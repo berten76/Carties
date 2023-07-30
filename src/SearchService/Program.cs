@@ -1,13 +1,14 @@
-using MongoDB.Driver;
-using MongoDB.Entities;
+using Polly;
+using Polly.Extensions.Http;
 using SearchService.Data;
-using SearchService.Models;
+using SearchService.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
 builder.Services.AddControllers();
+builder.Services.AddHttpClient<AuctionSvtHttpClient>().AddPolicyHandler(GetPolicy());
 
 var app = builder.Build();
 
@@ -17,13 +18,22 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-try
+app.Lifetime.ApplicationStarted.Register(async () =>
 {
-    await DbInitializer.InitDb(app);
-}
-catch (Exception ex)
-{ 
-    Console.WriteLine(ex); 
-}
+    try
+    {
+        await DbInitializer.InitDb(app);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(ex);
+    }
+});
+
 
 app.Run();
+
+static IAsyncPolicy<HttpResponseMessage> GetPolicy()
+    => HttpPolicyExtensions
+         .HandleTransientHttpError()
+         .WaitAndRetryForeverAsync(_ => TimeSpan.FromSeconds(3));
