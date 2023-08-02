@@ -3,6 +3,8 @@ using AuctionService.DTOs;
 using AuctionService.Entities;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using Contracts;
+using MassTransit;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,11 +17,15 @@ public class AuctionController : ControllerBase
 {
     private readonly AuctionDbContext _context;
     private readonly IMapper _mapper;
+    private readonly IPublishEndpoint _publishEndpoint;
 
-    public AuctionController(AuctionDbContext context, IMapper mapper)
+    public AuctionController(AuctionDbContext context, 
+                             IMapper mapper,
+                             IPublishEndpoint publishEndpoint)
     {
         _context = context;
         _mapper = mapper;
+        _publishEndpoint = publishEndpoint;
     }
 
     [HttpGet]
@@ -57,11 +63,15 @@ public class AuctionController : ControllerBase
 
         _context.Auctions.Add(auction);
 
+        var newAuction = _mapper.Map<AuctionDto>(auction);
+        var auctionCreated = _mapper.Map<AuctionCreated>(newAuction);
+        await _publishEndpoint.Publish(auctionCreated);
+
         var result = await _context.SaveChangesAsync() > 0;
 
         if (!result) return BadRequest("Could not save changes to db");
 
-        return CreatedAtAction(nameof(GetAuctionById), new { auction.Id }, _mapper.Map<AuctionDto>(auction));
+        return CreatedAtAction(nameof(GetAuctionById), new { auction.Id }, newAuction);
     }
 
     [HttpPut("{Id}")]
@@ -81,6 +91,10 @@ public class AuctionController : ControllerBase
         auction.Item.Color = updatedAuctionDto.Color ?? auction.Item.Color;
         auction.Item.Mileage = updatedAuctionDto.Mileage ?? auction.Item.Mileage;
 
+
+        var auctionUpdated = _mapper.Map<AuctionUpdated>(auction);
+        await _publishEndpoint.Publish(auctionUpdated);
+
         var result = await _context.SaveChangesAsync() > 0;
 
         if (!result) return BadRequest("Could not save changes to db");
@@ -96,6 +110,8 @@ public class AuctionController : ControllerBase
         if (auction == null) return NotFound();
 
         _context.Auctions.Remove(auction);
+
+        await _publishEndpoint.Publish(new AuctionDeleted { Id = id.ToString()});
 
         var result = await _context.SaveChangesAsync() > 0;
 
